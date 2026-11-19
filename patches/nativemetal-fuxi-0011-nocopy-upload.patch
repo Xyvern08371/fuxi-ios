@@ -1,0 +1,54 @@
+diff --git a/NativeBridgeMetalFrontend.mm b/NativeBridgeMetalFrontend.mm
+--- a/NativeBridgeMetalFrontend.mm
++++ b/NativeBridgeMetalFrontend.mm
+@@ -1402,8 +1402,48 @@
+    (unsigned long)d.mipmapLevelCount,(unsigned long)d.arrayLength,(unsigned long)d.sampleCount,(unsigned long)d.storageMode,
+    (unsigned long)d.cpuCacheMode,(unsigned long)d.hazardTrackingMode,(unsigned long)d.usage,(unsigned long)d.resourceOptions);
+  }
+- NBLOG(@"native-metal: newTextureWithBytesNoCopy:length:descriptor:deallocator: is not implemented (Apple's texture layout of raw memory is not known)");
+- return nil;
++ /* Apple hands raw texel storage here. The runtime already makes an image for
++  * this descriptor and uploads a caller bytes into it (nmb_texture_replace,
++  * which replaceRegion also uses), so serve the call that way rather than
++  * aliasing host pages: a block-compressed image (ASTC 4x4 is what backboardd
++  * asks for) cannot be sampled from a linear host mapping on this driver. */
++ NmbTextureDescriptor descriptor{};
++ if(!textureDescriptor(d,&descriptor)){NBLOG(@"native-metal: bytesNoCopy descriptor refused");return nil;}
++ NmbTexture *tex=nmb_texture_new(gDevice,&descriptor);
++ if(!tex){NBLOG(@"native-metal: bytesNoCopy texture refused: %@",lastError());return nil;}
++ const uint64_t region[6]={0,0,0,(uint64_t)d.width,(uint64_t)d.height,1};
++ /* The caller row pitch. A block-compressed row is ceil(w/4)*16 bytes and the
++  * caller may pad it, which is why the observed length exceeds the packed
++  * image. Use the packed pitch and copy only the packed image; nothing reads
++  * past the last block row. */
++ uint64_t row=0,image=(uint64_t)length;
++ const bool block=d.pixelFormat==204 || d.pixelFormat==205;
++ if(block){
++  const uint64_t packedRow=(((uint64_t)d.width+3)/4)*16;
++  row=packedRow;
++  image=packedRow*(uint64_t)d.height;
++ }
++ uint64_t span=0;
++ const bool spanOk=row
++   ? nmb_texture_copy_span(tex,region,0,0,row,image,true,&span)
++   : nmb_texture_copy_span(tex,region,0,0,0,image,true,&span);
++ if(!spanOk){
++  NBLOG(@"native-metal: bytesNoCopy span refused: %@",lastError());
++  nmb_texture_release(tex);return nil;
++ }
++ if(!row && d.height){row=span/(uint64_t)d.height;image=span;}
++ if(!nmb_texture_replace(tex,region,0,0,bytes,row,image,span)){
++  NBLOG(@"native-metal: bytesNoCopy upload refused: %@",lastError());
++  nmb_texture_release(tex);return nil;
++ }
++ NBTexture *texture=[NBTexture new];texture.handle=tex;
++ nmb_texture_describe(tex,&descriptor);texture.descriptor=descriptor;
++ noteFormat((uint32_t)descriptor.format,true);
++ /* The bytes were copied, so the caller deallocator has nothing left to free;
++  * dropping our reference satisfies Metal requirement that it never runs
++  * before the copy completes, which it has. */
++ (void)deallocator;
++ return (id<MTLTexture>)texture;
+ } @catch(NSException *e){fuxiFailure(e.reason.UTF8String);@throw;} } catch(const std::exception &e){fuxiFailure(e.what());throw;} catch(...){fuxiFailure("NativeMetal C++ exception");throw;} }
+ - (id)newTextureLayoutWithDescriptor:(MTLTextureDescriptor *)d isHeapOrBufferBacked:(BOOL)backed { try { @try {
+  (void)d;(void)backed;
