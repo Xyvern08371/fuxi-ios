@@ -21,6 +21,30 @@ pinned() {
 pinned Ath12kWifi https://github.com/UniXNU/Ath12kWifi.git "$ATH12K_SHA"
 pinned UniXNU-sheng https://github.com/UniXNU/UniXNU-sheng.git "$SHENG_SHA"
 pinned UniXNU https://github.com/UniXNU/UniXNU.git "$UNIXNU_SHA"
+# The locked FreeBSD branch tip moved upstream after the pin was written, so
+# fetch-sources.py's shallow branch clone no longer matches source-lock.json.
+# Fetch the exact pinned commit instead of the branch tip.
+python3 - "$work/Ath12kWifi/tools/fetch-sources.py" <<'FXPIN'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1]); t = p.read_text()
+old = '''    revision = git(directory, "rev-parse", "HEAD")
+    if revision != source["commit"]:
+        raise SystemExit(f"{name}: expected {source['commit']}, found {revision}; preserve the existing checkout and select the locked source")'''
+new = '''    revision = git(directory, "rev-parse", "HEAD")
+    if revision != source["commit"]:
+        subprocess.run(["git", "-C", str(directory), "fetch", "--depth", "1",
+                        "origin", source["commit"]], check=True)
+        subprocess.run(["git", "-C", str(directory), "checkout", "--detach",
+                        "FETCH_HEAD"], check=True)
+        revision = git(directory, "rev-parse", "HEAD")
+    if revision != source["commit"]:
+        raise SystemExit(f"{name}: expected {source['commit']}, found {revision}; preserve the existing checkout and select the locked source")'''
+if old not in t:
+    raise SystemExit("pinned resolve() block changed")
+p.write_text(t.replace(old, new, 1))
+print("patched fetch-sources.py: fetch the locked commit, not the branch tip")
+FXPIN
 # The module's build script asks Homebrew for "llvm" (llvm-nm, llvm-objcopy); hosted runners carry a versioned formula.
 prefix=$(brew --prefix)
 if [[ ! -x $prefix/opt/llvm/bin/llvm-objcopy ]]; then
