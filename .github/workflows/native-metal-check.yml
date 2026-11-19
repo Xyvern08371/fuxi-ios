@@ -92,9 +92,90 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'NCPY'
+"""Patch FuxiMetal to implement newTextureWithBytesNoCopy for plain BGRA8 2D
+textures. Backboardd wraps Apple's raw texture memory with it; the empty
+implementation refused every call, which forced whole frames back to CPU.
+Strategy: copy the caller bytes into a GPU-visible buffer, then build the
+texture as a linear BGRA8 image over it (the validated linear path)."""
+from pathlib import Path
+
+p = Path('source/tools/fuxi-metal/Frontend.mm')
+t = p.read_text()
+
+old = '''- (id)newTextureWithBytesNoCopy:(void *)bytes length:(NSUInteger)length descriptor:(MTLTextureDescriptor *)d deallocator:(void (^)(void *,NSUInteger))deallocator {CENSUS();FUXI_PHASE(newTexture);
+ (void)bytes;(void)deallocator;
+ failureLog("FUXI MTL: texture reject bytesNoCopy 1 desc=%s length=%lu (use validated buffer/linear texture path)\\n",textureDescriptorText(d).UTF8String,(unsigned long)length);return nil;
+}'''
+
+new = '''- (id)newTextureWithBytesNoCopy:(void *)bytes length:(NSUInteger)length descriptor:(MTLTextureDescriptor *)d deallocator:(void (^)(void *,NSUInteger))deallocator {CENSUS();FUXI_PHASE(newTexture);
+ if(clientMode==fuxi::ClientMode::census){unsupported(self,_cmd);return nil;}
+ if(!bytes || !d || !length){unsupported(self,_cmd);return nil;}
+ /* Only the plain single-mip 2D cases Apple hands us through raw memory: 2D
+  * type, one level, one sample, one array slice, shared storage, ShaderRead
+  * usage. Anything richer keeps the explicit refusal. */
+ if(d.textureType!=MTLTextureType2D || d.mipmapLevelCount!=1 || d.sampleCount!=1 ||
+    d.arrayLength!=1 || d.depth!=1 || d.storageMode!=MTLStorageModeShared ||
+    (d.textureType==MTLTextureType2D && d.usage!=MTLTextureUsageShaderRead) ||
+    !fuxi::textureFormatAccepted((uint32_t)d.pixelFormat) ||
+    !textureDescriptorAccepted(d,owner(self)->backend->maxTextureDimension())) {
+  failureLog("FUXI MTL: texture reject bytesNoCopy 2 desc=%s length=%lu (shape/usage)\n",
+      textureDescriptorText(d).UTF8String,(unsigned long)length);
+  return nil;
+ }
+ size_t row=(size_t)d.width*texelBytes((uint32_t)d.pixelFormat);
+ size_t need=row*(size_t)d.height;
+ if(!row || need>length) {
+  failureLog("FUXI MTL: texture reject bytesNoCopy 3 desc=%s length=%lu need=%zu\n",
+      textureDescriptorText(d).UTF8String,(unsigned long)length,need);
+  return nil;
+ }
+ FuxiBuffer *backing=[self newBufferWithLength:need options:MTLResourceStorageModeShared];
+ if(!backing){failureLog("FUXI MTL: texture reject bytesNoCopy 4 alloc=%zu\\n",need);return nil;}
+ memcpy(backing->_buffer->contents,bytes,need);
+ FuxiTexture *t=[FuxiTexture new];t->_device=[self retain];
+ t->_descriptorText=[textureDescriptorText(d) copy];t->_cacheMode=d.cpuCacheMode;
+ t->_usage=d.usage;t->_shared=YES;t->_memoryless=NO;
+ try {
+  t->_texture=owner(self)->backend->linearTexture(backing->_buffer,(uint32_t)d.pixelFormat,
+      (uint32_t)d.usage,(uint32_t)d.width,(uint32_t)d.height,0,row);
+ } catch(const std::exception &e) {
+  /* Fall back to an optimal-tiling copy the same size; content is identical
+   * because the bytes are already resident in the backing buffer. */
+  try {
+   t->_texture=owner(self)->backend->allocateTexture((uint32_t)d.pixelFormat,
+       (uint32_t)d.usage,(uint32_t)d.width,(uint32_t)d.height,1,2,1);
+   backing->_buffer->shadowBacking=true;
+   t->_backingBuffer=[backing retain];t->_backingOffset=0;t->_backingRow=row;
+  } catch(const std::exception &a) {
+   failureLog("FUXI MTL: texture reject bytesNoCopy 5 %s / %s\\n",e.what(),a.what());
+   [t release];[backing release];return nil;
+  }
+ }
+ if(deallocator)t->_detachDeallocator=[deallocator copy];
+ t->_detachBytes=bytes;t->_detachLength=length;
+ return t;
+}'''
+
+assert old in t, 'newTextureWithBytesNoCopy anchor missing'
+t = t.replace(old, new, 1)
+p.write_text(t)
+print('patched Frontend.mm: newTextureWithBytesNoCopy implemented')
+
+# FuxiTexture needs the two new fields.
+p = Path('source/tools/fuxi-metal/Frontend.mm')
+t = p.read_text()
+old_iface = '@interface FuxiTexture : FuxiResource { @public fuxi::Texture *_texture;'
+new_iface = ('@interface FuxiTexture : FuxiResource { @public fuxi::Texture *_texture;'
+             'void *_detachBytes;NSUInteger _detachLength;void (^_detachDeallocator)(void *,NSUInteger);')
+assert old_iface in t, 'FuxiTexture ivar anchor missing'
+t = t.replace(old_iface, new_iface, 1)
+p.write_text(t)
+print('patched Frontend.mm: FuxiTexture detach ivars')
 
 NCPY
-          grep -n 'bytesNoCopy 5' source/tools/fuxi-metal/Frontend.mm
+          grep -n 'bytesNoCopy' source/tools/fuxi-metal/Frontend.mm | head -5
+
+
 
       - name: Build and audit NativeMetal
         shell: bash
