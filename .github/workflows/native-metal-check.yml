@@ -52,6 +52,25 @@ jobs:
           cd source
           python3 /tmp/fuxi-ci-patch.py
           sed -n '/newTextureWithBytesNoCopy/,+6p' tools/fuxi-metal/Frontend.mm
+      - name: Cache Rust deps and build tree
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            source/deps
+          key: fuxi-metal-${{ hashFiles('harness/.github/workflows/native-metal-check.yml') }}-${{ github.run_id }}
+          restore-keys: |
+            fuxi-metal-
+
+      - name: Cache build directory
+        uses: actions/cache@v4
+        with:
+          path: |
+            source/tools/out/ci/nativemetal
+          key: fuxi-metal-out-${{ github.run_id }}
+          restore-keys: |
+            fuxi-metal-out-
       - name: Build and audit NativeMetal
         shell: bash
         run: |
