@@ -44,6 +44,49 @@ jobs:
           cp harness/patches/nativemetal-fuxi-0009-copy-span.patch source/tools/patches/
           cp harness/patches/nativemetal-fuxi-0010-nocopy-provenance.patch source/tools/patches/
           cp harness/patches/metal2vulkan-fuxi-0001-copy-span.patch source/tools/patches/
+      - name: Fuxi GPU passthrough patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'FXPATCH'
+          from pathlib import Path
+
+          # 1) SpringBoard must be able to see a Metal device for UI passthrough.
+          p = Path('source/tools/fuxi-metal/ClientGate.hpp')
+          t = p.read_text()
+          old = 'return !strcmp(s,"SpringBoard") || !strcmp(s,"mediaserverd");'
+          new = 'return !strcmp(s,"mediaserverd");'
+          assert old in t, 'hiddenClient anchor'
+          p.write_text(t.replace(old, new, 1))
+
+          # 2) Accept the two private XR formats backboardd/CA request (550, 554).
+          p = Path('source/tools/fuxi-metal/PixelFormats.hpp')
+          t = p.read_text()
+          old = 'case 1:case 10:case 23:case 25:case 30:case 43:return 2;'
+          new = 'case 1:case 10:case 23:case 25:case 30:case 43:case 550:return 2;'
+          assert old in t, 'texel-bytes anchor'
+          t = t.replace(old, new, 1)
+          old = 'case 55:case 70:case 80:case 81:case 94:return 4;'
+          new = 'case 55:case 70:case 80:case 81:case 94:case 554:return 4;'
+          assert old in t, 'texel-4 anchor'
+          t = t.replace(old, new, 1)
+          old = 'case 1:case 10:case 23:case 25:case 30:case 43:case 55:case 70:case 80:case 94:case 105:case 115:return true;'
+          new = 'case 1:case 10:case 23:case 25:case 30:case 43:case 55:case 70:case 80:case 94:case 105:case 115:case 550:case 554:return true;'
+          assert old in t, 'accepted anchor'
+          p.write_text(t.replace(old, new, 1))
+
+          # 3) Backend Vulkan mapping: both private formats render as 10-bit BGRA.
+          p = Path('source/tools/fuxi-metal/Backend.hpp')
+          t = p.read_text()
+          old = 'case 94:return VK_FORMAT_A2R10G10B10_UNORM_PACK32;'
+          new = 'case 94:case 550:case 554:return VK_FORMAT_A2R10G10B10_UNORM_PACK32;'
+          assert old in t, 'backend format anchor'
+          p.write_text(t.replace(old, new, 1))
+
+          print('fuxi passthrough patches applied')
+          FXPATCH
+          grep -n 'mediaserverd' source/tools/fuxi-metal/ClientGate.hpp
+          grep -n '550' source/tools/fuxi-metal/PixelFormats.hpp source/tools/fuxi-metal/Backend.hpp
       - name: Build and audit NativeMetal
         shell: bash
         run: |
