@@ -1,0 +1,64 @@
+name: Build Fuxi Turnip ICD
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  turnip:
+    runs-on: macos-15-intel
+    timeout-minutes: 180
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - name: Fetch pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin https://github.com/zgl97/ios-fuxi.git
+          git -C source fetch --no-tags --depth=1 origin 4b8faded6e76a4730832144fc3cae34c4419fa51
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 4b8faded6e76a4730832144fc3cae34c4419fa51
+          git init mesa
+          git -C mesa remote add origin https://github.com/mesa3d/mesa.git
+          git -C mesa fetch --no-tags --depth=1 origin 85fda3b36405bcaea8bffc64aa4f2651dc90770d
+          git -C mesa checkout --detach FETCH_HEAD
+          test "$(git -C mesa rev-parse HEAD)" = 85fda3b36405bcaea8bffc64aa4f2651dc90770d
+          git init unixnu
+          git -C unixnu remote add origin https://github.com/UniXNU/UniXNU.git
+          git -C unixnu fetch --no-tags --depth=1 origin fb6aad6ab1f50199a4d99d2da1d0ca403b067633
+          git -C unixnu checkout --detach FETCH_HEAD
+          test "$(git -C unixnu rev-parse HEAD)" = fb6aad6ab1f50199a4d99d2da1d0ca403b067633
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install meson ninja glslang bison
+          brew install python-mako python-yaml python-packaging || pip3 install --break-system-packages mako pyyaml packaging
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+      - name: Build Turnip
+        shell: bash
+        run: |
+          set -euo pipefail
+          bison --version | head -1
+          glslangValidator --version | head -2
+          python3 -c 'import mako, yaml, packaging; print("python deps ok")'
+          python3 source/tools/build-fuxi-turnip.py \
+            --mesa "$PWD/mesa" \
+            --patches "$PWD/unixnu/patches/mesa" \
+            --build "$PWD/turnip-build" \
+            --out "$PWD/turnip-out"
+      - name: Show outputs
+        if: always()
+        shell: bash
+        run: |
+          ls -la turnip-out 2>/dev/null || true
+          cat turnip-out/M3-SHA256SUMS 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuxi-turnip-icd
+          path: turnip-out/
+          if-no-files-found: warn
+          retention-days: 7
