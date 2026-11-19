@@ -87,6 +87,15 @@ jobs:
           FXPATCH
           grep -n 'mediaserverd' source/tools/fuxi-metal/ClientGate.hpp
           grep -n '550' source/tools/fuxi-metal/PixelFormats.hpp source/tools/fuxi-metal/Backend.hpp
+      - name: Fuxi no-copy texture support
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'NCPY'
+
+NCPY
+          grep -n 'bytesNoCopy 5' source/tools/fuxi-metal/Frontend.mm
+
       - name: Build and audit NativeMetal
         shell: bash
         run: |
