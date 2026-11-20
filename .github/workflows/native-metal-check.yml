@@ -51,6 +51,9 @@ jobs:
           cp harness/patches/metal2vulkan-adrenometal-0013-skip-unchanged-rebinds.patch source/tools/patches/
           cp harness/patches/metal2vulkan-adrenometal-0014-map-tracker-keys.patch source/tools/patches/
           cp harness/patches/metal2vulkan-adrenometal-0015-two-plane-shadow-as-memory-lies.patch source/tools/patches/
+          cp harness/patches/patch-translator.py source/tools/patches/
+          python3 harness/patches/patch-translator.py source/tools/build-fuxi-metal-translator.sh tools/patches
+          grep -n 'FUXI_M2V_DRAW_APPLY' source/tools/build-fuxi-metal-translator.sh
           cp harness/patches/metal2vulkan-fuxi-0001-copy-span.patch source/tools/patches/
       - name: Fuxi GPU passthrough patches
         shell: bash
