@@ -44,6 +44,13 @@ jobs:
           cp harness/patches/nativemetal-fuxi-0009-copy-span.patch source/tools/patches/
           cp harness/patches/nativemetal-fuxi-0010-nocopy-provenance.patch source/tools/patches/
           cp harness/patches/nativemetal-fuxi-0011-nocopy-upload.patch source/tools/patches/
+          cp harness/patches/metal2vulkan-adrenometal-0009-keep-final-pass.patch source/tools/patches/
+          cp harness/patches/metal2vulkan-adrenometal-0010-fewer-allocations-per-draw.patch source/tools/patches/
+          cp harness/patches/metal2vulkan-adrenometal-0011-keep-draw-commands.patch source/tools/patches/
+          cp harness/patches/metal2vulkan-adrenometal-0012-keep-draw-lists.patch source/tools/patches/
+          cp harness/patches/metal2vulkan-adrenometal-0013-skip-unchanged-rebinds.patch source/tools/patches/
+          cp harness/patches/metal2vulkan-adrenometal-0014-map-tracker-keys.patch source/tools/patches/
+          cp harness/patches/metal2vulkan-adrenometal-0015-two-plane-shadow-as-memory-lies.patch source/tools/patches/
           cp harness/patches/metal2vulkan-fuxi-0001-copy-span.patch source/tools/patches/
       - name: Fuxi GPU passthrough patches
         shell: bash
